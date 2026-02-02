@@ -1,4 +1,4 @@
-# Squirrel Stash
+# Poll Bot
 
 A Discord poll bot example built with [scurrypy](https://github.com/scurry-works/scurrypy).
 
