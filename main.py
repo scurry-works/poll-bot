@@ -4,8 +4,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 TOKEN = os.getenv("BOT_TOKEN")
-APP_ID = 0
-GUILD_ID = 0
+APP_ID = 1386436781330923753
+GUILD_ID = 905167903224123473
 
 # --- Core library imports ---
 from scurrypy import (
@@ -216,7 +216,8 @@ async def on_poll_ready(bot: Client, interaction: Interaction):
         A.danger(f'end{TOKEN_SEPARATOR}{poll_id}{TOKEN_SEPARATOR}{poll.created_by}', 'End Poll')
     ])
 
-    await interaction.respond(MessagePart(embeds=[embed], components=[select_row, end_btn]))
+    await bot.channel(event.channel_id).send(MessagePart(embeds=[embed], components=[select_row, end_btn]))
+    await interaction.update(content="Poll has been posted!")
 
 @components.button(f'vote{TOKEN_SEPARATOR}*')
 async def on_poll_vote(bot: Client, interaction: Interaction):
