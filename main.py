@@ -9,25 +9,27 @@ GUILD_ID = 905167903224123473
 
 # --- Core library imports ---
 from scurrypy import (
-    Client, 
+    Client, Intents,
     CommandOptionPart, CommandOptionTypes, CommandOptionChoicePart, 
     Interaction, InteractionEvent, 
-    MessagePart, EmbedPart
+    MessagePart, EmbedPart, EmojiModel
 )
 
-client = Client(TOKEN)
+client = Client(TOKEN, Intents.set(guild_expressions=True))
 
-from scurry_kit import setup_default_logger, CommandsAddon, ComponentsAddon, ActionRowBuilder as A
+from scurry_kit import setup_default_logger, CommandsAddon, ComponentsAddon, ActionRowBuilder as A, GuildEmojiCacheAddon
 
 logger = setup_default_logger()
 
 commands = CommandsAddon(client, APP_ID)
 components = ComponentsAddon(client)
+emojis_cache = GuildEmojiCacheAddon(client)
 
 TOKEN_SEPARATOR = '::' # for custom IDs
 
 from dataclasses import dataclass, field
 from time import time
+from typing import Union
 
 @dataclass
 class Poll:
@@ -35,7 +37,7 @@ class Poll:
     created_by: int
     created_at: int
     expires_after: int = 86400
-    emojis: list[str] = field(default_factory=list)
+    emojis: list[EmojiModel] = field(default_factory=list)
     options: list[str] = field(default_factory=list)
     votes: list[int] = field(default_factory=list)
     voted: set[int] = field(default_factory=set)
@@ -97,6 +99,19 @@ import re
 CUSTOM_EMOJI_REGEX = re.compile(r'^<a?:\w+:\d+>$')
 DEFAULT_EMOJIS = ['🔴', '🟠', '🟡', '🟢', '🔵']
 
+def emoji_from_mention(emoji_mention: str) -> Union[EmojiModel, False]:
+    first_colon = emoji_mention.find(':')
+    second_colon = emoji_mention.find(':', first_colon +1)
+
+    name = emoji_mention[first_colon+1:second_colon]
+
+    try:
+        id = int(emoji_mention[second_colon+1:-1])
+    except ValueError:
+        return False
+    
+    return EmojiModel(name, id, 'a:' in emoji_mention)
+
 @commands.slash_command(
     'poll', 
     'Create a poll for users to react to!', 
@@ -147,26 +162,35 @@ async def on_poll_init(bot: Client, interaction: Interaction):
     # validate emojis (default to list given if no emojis are provided)
     emojis = event.data.get_option('emojis')
 
+    # make there is an emoji for every option
+    if emojis and len(emojis) < option_len:
+        await interaction.respond("Oops, if you supply emojis, you need an emoji for every option!", ephemeral=True)
+        return
+
+    emoji_list = []
+
     if emojis:
         emojis = [i.strip() for i in emojis.split(',')[:option_len]]
 
-        if any([CUSTOM_EMOJI_REGEX.match(e) for e in emojis]):
-            await interaction.respond("Oops, if you supply emojis, you need to use *standard* emojis!", ephemeral=True)
-            return
+        for e in emojis:
+            if CUSTOM_EMOJI_REGEX.match(e):
+                emoji = emoji_from_mention(e)
+                if not emoji:
+                    await interaction.respond("Oops, looks like a custom emoji was not formatted correctly!", ephemeral=True)
+                    return
+                else:
+                    emoji_list.append(emoji)
+            else:
+                emoji_list.append(EmojiModel(e))
     else:
-        emojis = DEFAULT_EMOJIS[:option_len]
-    
-    # make there is an emoji for every option
-    if len(emojis) < option_len:
-        await interaction.respond("Oops, if you supply emojis, you need an emoji for every option!", ephemeral=True)
-        return
+        emoji_list = [EmojiModel(name) for name in DEFAULT_EMOJIS[:option_len]]
     
     poll = Poll(
         title=title, 
         created_by=event.member.user.id, 
         created_at=int(time()),
         expires_after=expires_after, 
-        emojis=emojis,
+        emojis=emoji_list,
         options=options, 
         votes=[0] * option_len
     )
@@ -174,8 +198,8 @@ async def on_poll_init(bot: Client, interaction: Interaction):
     embed = EmbedPart(
         title=title, 
         description='\n'.join(
-            f"{e}  {i}" 
-            for e, i in zip(emojis, options)
+            f"{e.mention}  {i}" 
+            for e, i in zip(poll.emojis, poll.options)
         ) + f"\n\n ⏱️ Ends {poll.discord_expire_ts}"
     )
 
@@ -203,7 +227,7 @@ async def on_poll_ready(bot: Client, interaction: Interaction):
     embed = EmbedPart(
         title=poll.title, 
         description='\n'.join(
-            f"{e}  {i}" 
+            f"{e.mention}  {i}" 
             for e, i in zip(poll.emojis, poll.options)
         ) + f"\n\n ⏱️ Ends {poll.discord_expire_ts}"
     )
@@ -246,7 +270,7 @@ async def on_poll_vote(bot: Client, interaction: Interaction):
     embed = EmbedPart(
         title=poll.title, 
         description='\n'.join(
-            f"{e}  {i}  -- **{v}** ({poll.votes[idx]/total:.0%})" 
+            f"{e.mention}  {i}  -- **{v}** ({poll.votes[idx]/total:.0%})" 
             for idx, e, i, v in zip(range(len(poll.votes)), poll.emojis, poll.options, poll.votes)
         ) + f"\n\n ⏱️ Ends {poll.discord_expire_ts}"
     )
@@ -284,7 +308,7 @@ async def on_poll_end(bot: Client, interaction: Interaction):
     embed = EmbedPart(
         title=poll.title, 
         description='\n'.join(
-            f"{e}  {i}  -- **{v}** ({poll.votes[idx]/total:.0%})" 
+            f"{e.mention}  {i}  -- **{v}** ({poll.votes[idx]/total:.0%})" 
             for idx, e, i, v in zip(range(len(poll.votes)), poll.emojis, poll.options, poll.votes)
         )
     )
